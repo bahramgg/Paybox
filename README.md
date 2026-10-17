@@ -233,6 +233,12 @@ this; it is a candidate for the next scenario set.
 - Through the PayBox agent connector (`discover_plugins` -> `use_plugin`), the installed plugin returned the
   same verdicts as the local runs: VIRTUAL CONSISTENT (10/10), PRXN at 0.4 ETH CAUTION `SIZE_DEPENDENT`
   ("a 1.6 ETH trade fails"), Joy BLOCK `SELL_FAILS_NOW`.
+- Live buy through the agent: `multiverse_buy` for 0.0003 ETH of VIRTUAL returned a proposal, PayBox simulated it,
+  the user approved it on the PayBox website, and it was broadcast on Base as
+  [`0x25df63fe62ed038426146d7d440b473b616f473e7816945f80b6f108e2af6e60`](https://basescan.org/tx/0x25df63fe62ed038426146d7d440b473b616f473e7816945f80b6f108e2af6e60)
+  (block 52742297, status 0x1, 119,675 gas). The wallet received 1.102734461572701695 VIRTUAL; the simulated
+  amount behind the proposal's `minOut` (300 bps slippage) was 1.102734 VIRTUAL, so the simulation matched the
+  real fill to six decimals.
 
 ## Agent flow
 
