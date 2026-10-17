@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, maxUint256, parseEther, type Address } from "viem";
+import { decodeFunctionData, encodeAbiParameters, encodeFunctionData, getAddress, maxUint256, parseEther, type Address } from "viem";
 
-import { factoryAbi, pairAbi, routerAbi, tokenAbi, TRANSFER_TOPIC, V2_ROUTER, WETH } from "../src/constants.js";
+import { CHAIN_KEYS, CHAINS, chainByCaip, factoryAbi, pairAbi, routerAbi, tokenAbi, TRANSFER_TOPIC, V2_ROUTER, WETH } from "../src/constants.js";
 import { freshWallet, planScenarios } from "../src/engine.js";
 import {
-  approveCall, buyCalldata, decodeQuote, decodeSymbol, quoteSellCall, requestedBlocks, revertReason, sellCall,
+  approveCall, buyCalldata, decodeQuote, decodeSymbol, fundSender, quoteSellCall, requestedBlocks, revertReason, sellCall,
   simulateRequest, sumTransfersTo, type Header,
 } from "../src/simulate.js";
 import { lossPct, taxPct, untrustedText } from "../src/text.js";
@@ -130,4 +130,36 @@ test("math: tax and round-trip percentages", () => {
   assert.equal(lossPct(994n, 1000n), 0.6);
   assert.equal(lossPct(1010n, 1000n), -1);
   assert.equal(untrustedText("  a\u0007b​ c  ", 32), "ab c");
+});
+
+test("chains: every config is canonical and self-consistent", () => {
+  assert.deepEqual(Object.keys(CHAINS), [...CHAIN_KEYS]);
+  for (const key of CHAIN_KEYS) {
+    const chain = CHAINS[key];
+    assert.equal(chain.key, key);
+    assert.match(chain.caip, /^eip155:[1-9][0-9]*$/);
+    for (const address of [chain.weth, chain.factory, chain.router]) assert.equal(getAddress(address), address);
+    assert.ok(chain.rpcUrls.length >= 1 && chain.rpcUrls.every((url) => new URL(url).protocol === "https:"));
+    assert.ok(chain.blockSeconds >= 1);
+    assert.equal(chainByCaip(chain.caip), chain);
+  }
+  assert.equal(new Set(CHAIN_KEYS.map((key) => CHAINS[key].caip)).size, CHAIN_KEYS.length);
+  assert.equal(CHAINS.base.router, V2_ROUTER);
+  assert.equal(CHAINS.base.weth, WETH);
+});
+
+test("chains: calls use the selected chain's router and WETH", () => {
+  const eth = CHAINS.ethereum;
+  assert.deepEqual(decodeFunctionData({ abi: routerAbi, data: buyCalldata(TOKEN, USER, 1n, 2n, eth) }).args, [1n, [eth.weth, TOKEN], USER, 2n]);
+  const sell = sellCall(USER, TOKEN, 3n, 4n, eth);
+  assert.equal(sell.to, eth.router);
+  assert.deepEqual(decodeFunctionData({ abi: routerAbi, data: sell.data }).args, [3n, 0n, [TOKEN, eth.weth], USER, 4n]);
+  assert.equal(quoteSellCall(USER, TOKEN, 5n, eth).to, eth.router);
+  assert.deepEqual(decodeFunctionData({ abi: tokenAbi, data: approveCall(USER, TOKEN, CHAINS.arbitrum).data }).args, [CHAINS.arbitrum.router, maxUint256]);
+});
+
+test("funding: the sender gets the trade plus gas at the fee cap, never less than 0.05 ETH extra", () => {
+  assert.equal(fundSender(USER, 1n, header).balance, 1n + parseEther("0.05"));
+  const pricey = { ...header, baseFee: 50_000_000_000n }; // 50 gwei
+  assert.equal(fundSender(USER, 1n, pricey).balance, 1n + 8_000_000n * (100_000_000_000n + 1_000_000n) * 8n);
 });

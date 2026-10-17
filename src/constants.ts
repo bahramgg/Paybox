@@ -1,12 +1,58 @@
 import { getAddress, parseAbi, parseEther, type Address } from "viem";
 
-export const CHAIN = "eip155:8453";
-export const WETH: Address = getAddress("0x4200000000000000000000000000000000000006");
-export const V2_FACTORY: Address = getAddress("0x8909dc15e40173ff4699343b6eb8132c65e18ec6");
-export const V2_ROUTER: Address = getAddress("0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24");
+export interface ChainConfig {
+  key: string;
+  name: string;
+  caip: string;
+  weth: Address;
+  factory: Address;
+  router: Address;
+  // Primary first. The fallback is only used when the primary is saturated or failing.
+  rpcUrls: readonly string[];
+  // Seconds between simulated blocks, and the divisor for hold gaps, so the filler blocks the RPC
+  // inserts (+2 s on Base, +12 s on Ethereum and Arbitrum) never pass the sell block's time.
+  blockSeconds: number;
+}
 
-// Primary first. The fallback is only used when the primary is saturated or failing.
-export const RPC_URLS = ["https://mainnet.base.org", "https://base-rpc.publicnode.com"] as const;
+// Every router below was checked on-chain: router.factory() and router.WETH() match these values.
+export const CHAINS = {
+  base: {
+    key: "base", name: "Base", caip: "eip155:8453",
+    weth: getAddress("0x4200000000000000000000000000000000000006"),
+    factory: getAddress("0x8909dc15e40173ff4699343b6eb8132c65e18ec6"),
+    router: getAddress("0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"),
+    rpcUrls: ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+    blockSeconds: 2,
+  },
+  ethereum: {
+    key: "ethereum", name: "Ethereum", caip: "eip155:1",
+    weth: getAddress("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+    factory: getAddress("0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"),
+    router: getAddress("0x7a250d5630b4cf539739df2c5dacb4c659f2488d"),
+    rpcUrls: ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
+    blockSeconds: 12,
+  },
+  // Optimism was left out: its Uniswap V2 WETH pools hold well under 0.5 WETH (OP 0.19, DAI 0.30 on 2026-10-17).
+  arbitrum: {
+    key: "arbitrum", name: "Arbitrum", caip: "eip155:42161",
+    weth: getAddress("0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
+    factory: getAddress("0xf1d7cc64fb4452f05c498126312ebe29f30fbcf9"),
+    router: getAddress("0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"),
+    rpcUrls: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
+    blockSeconds: 12,
+  },
+} as const satisfies Record<string, ChainConfig>;
+
+export type ChainKey = keyof typeof CHAINS;
+export const CHAIN_KEYS = ["base", "ethereum", "arbitrum"] as const satisfies readonly ChainKey[];
+export const DEFAULT_CHAIN: ChainKey = "base";
+
+export const chainByCaip = (caip: string): ChainConfig | undefined => Object.values(CHAINS).find((chain) => chain.caip === caip);
+
+// Base aliases, kept for callers that predate multi-chain support.
+export const WETH: Address = CHAINS.base.weth;
+export const V2_FACTORY: Address = CHAINS.base.factory;
+export const V2_ROUTER: Address = CHAINS.base.router;
 
 export const RPC_TIMEOUT_MS = 3_500;
 export const TOOL_BUDGET_MS = 8_500;

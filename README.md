@@ -4,13 +4,13 @@ A PayBox plugin for the MoonPay Hackathon (Chapter 1). Owner: Bahram (@nabu_line
 
 Honeypot checkers ask one question: can a wallet sell this token right now? A clean answer at one
 moment does not prove you can exit later. Multiverse simulates the agent's exact planned trade
-(buy → hold → sell) across several universes on Base: different hold times, trade sizes, sell order
-and wallets. It then compares the outcomes.
+(buy → hold → sell) across several universes on Base, Ethereum or Arbitrum: different hold times, trade
+sizes, sell order and wallets. It then compares the outcomes.
 
 - **Consistent everywhere**: the agent may buy, and `multiverse_buy` proposes the exact simulated trade.
 - **Different anywhere**: the agent refuses and explains, in one line, where behavior diverged.
 
-Defensive and read-only: every universe is an `eth_simulateV1` call against Base mainnet state. Nothing
+Defensive and read-only: every universe is an `eth_simulateV1` call against mainnet state. Nothing
 is deployed or broadcast, no private keys or secrets are needed, and the plugin returns at most one
 unsigned buy that PayBox shows for approval.
 
@@ -19,21 +19,22 @@ unsigned buy that PayBox shows for approval.
 | Tool | What it does |
 |---|---|
 | `multiverse_probe` | Read-only. Simulates the planned buy and sell in up to 10 universes and returns a verdict. |
-| `multiverse_buy` | Re-checks the `now` and `t_1h` universes for this exact size and wallet. If the verdict allows it, returns one unsigned Uniswap V2 buy (`io.paybox/transactionProposal`, `eip155:8453`). |
-| `multiverse_about` | Static: scenarios, owner rules, thresholds, verdicts and limitations. No network; used as the conformance sample. |
+| `multiverse_buy` | Re-checks the `now` and `t_1h` universes for this exact size and wallet. If the verdict allows it, returns one unsigned Uniswap V2 buy (`io.paybox/transactionProposal`) on the selected chain. |
+| `multiverse_about` | Static: chains, scenarios, owner rules, thresholds, verdicts and limitations. No network; used as the conformance sample. |
 
-`multiverse_probe` input: `{ token, amount_eth, wallet, horizons?, max_tax_pct? }`. `amount_eth` is a decimal
-string from 0.0001 to 5. `horizons` is a subset of `10m`, `1h`, `6h`, `24h` (default `10m`, `1h`, `24h`).
-`max_tax_pct` defaults to 15.
+`multiverse_probe` input: `{ token, amount_eth, wallet, chain?, horizons?, max_tax_pct? }`. `chain` is `base`
+(default), `ethereum` or `arbitrum`. `amount_eth` is a decimal string from 0.0001 to 5, in that chain's
+native ETH. `horizons` is a subset of `10m`, `1h`, `6h`, `24h` (default `10m`, `1h`, `24h`). `max_tax_pct`
+defaults to 15.
 
-`multiverse_buy` input: `{ token, amount_eth, wallet, max_slippage_bps? (default 300, max 1500), accept_caution? (default false) }`.
+`multiverse_buy` input: `{ token, amount_eth, wallet, chain?, max_slippage_bps? (default 300, max 1500), accept_caution? (default false) }`.
 It returns no proposal for `BLOCK`, `UNSUPPORTED_VENUE` or `INCOMPLETE`, or for `CAUTION` without
 `accept_caution: true`. That is a normal result, not an error. Otherwise it proposes
 `swapExactETHForTokensSupportingFeeOnTransferTokens(minOut, [WETH, token], wallet, now + 300)` on the
 UniswapV2Router02, with `value` set to the ETH amount and
 `minOut = floor(simulated_received × (10000 − max_slippage_bps) / 10000)`.
 
-Output (`structuredContent`, declared in `outputSchema`): `token` (address, `symbol_untrusted`, decimals),
+Output (`structuredContent`, declared in `outputSchema`): `chain` (CAIP-2 id), `token` (address, `symbol_untrusted`, decimals),
 `venue` (pair and WETH reserve), `block`, `scenarios[]` (each with buy/sell ok, taxes, round-trip loss and
 revert reason), `flags[]`, `verdict`, `exit_horizon`, `first_divergence`, `recommendation`, `disclaimer` and
 `rules_version`. `multiverse_buy` adds `buy` (what was or wasn't proposed and why), plus the proposal
@@ -41,6 +42,21 @@ when there is one. The text content is a 5–8 line plain summary.
 
 Token symbols and revert strings are untrusted contract data. They are stripped of control and format
 characters, truncated, and never placed in instructions.
+
+## Chains
+
+Each router was checked on-chain: `router.factory()` and `router.WETH()` match the table.
+
+| `chain` | CAIP-2 | Uniswap V2 factory | UniswapV2Router02 | WETH | Simulated block step | RPC hosts (primary, fallback) |
+|---|---|---|---|---|---|---|
+| `base` (default) | `eip155:8453` | `0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6` | `0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24` | `0x4200000000000000000000000000000000000006` | 2 s | `mainnet.base.org`, `base-rpc.publicnode.com` |
+| `ethereum` | `eip155:1` | `0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f` | `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | 12 s | `ethereum-rpc.publicnode.com`, `eth.drpc.org` |
+| `arbitrum` | `eip155:42161` | `0xf1D7CC64Fb4452F05c498126312eBE29f30Fbcf9` | `0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24` | `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1` | 12 s | `arbitrum-one-rpc.publicnode.com`, `arb1.arbitrum.io` |
+
+The block step is also the divisor for hold gaps: the RPC fills skipped blocks at +2 s on Base and +12 s on
+Ethereum and Arbitrum, so a hold advances `min(hold / step, 200)` blocks and the filler blocks never pass the
+sell block's time. Optimism was left out: its Uniswap V2 WETH pools hold well under 0.5 WETH (OP 0.19,
+DAI 0.30 on 2026-10-17), so no token there could come back CONSISTENT.
 
 ## How a probe works
 
@@ -58,10 +74,12 @@ characters, truncated, and never placed in instructions.
 Every simulated block reuses the real latest header (`feeRecipient` = latest `miner`, `baseFeePerGas` =
 latest value). Only `number` and `time` advance, and all universes are anchored to the same base block.
 Calls carry a realistic gas price (base fee plus a 0.001 gwei tip), so `tx.gasprice` is never zero. The
-sender's ETH balance is set by a state override (`amount + 0.05 ETH`), so no real funds are needed. A hold
-sets the sell block's `time` to the hold length and its `number` to `min(hold / 2, 200)` blocks ahead.
-reth caps a call at 256 simulated blocks, filler blocks included. If the RPC rejects the gap, Multiverse
-retries one block ahead with the same time jump and reports `block.number_gap_limited: true`.
+sender's ETH balance is set by a state override (the amount plus gas for every call at the simulated fee
+cap, at least 0.05 ETH), so no real funds are needed. A hold sets the sell block's `time` to the hold length
+and its `number` to `min(hold / step, 200)` blocks ahead. reth caps a call at 256 simulated blocks, filler
+blocks included. If the RPC rejects the gap, Multiverse retries one block ahead with the same time jump and
+reports `block.number_gap_limited: true`. Any other JSON-RPC error is retried once after 300 ms, because
+load-balanced public RPCs sometimes answer from a node that has not reached the anchor block yet.
 
 Budget: 3.5 s per RPC request and 8.5 s per tool call. The plugin returns partial results as `INCOMPLETE`
 rather than run past PayBox's 10 s limit. Concurrency is capped at 6 per host: the primary RPC fills
@@ -122,7 +140,9 @@ Exit horizon = the longest tested hold whose sell succeeds with sell tax ≤ `ma
 
 ## Limitations
 
-- Uniswap V2 WETH pairs on Base only (MVP). Aerodrome and Uniswap V3 are stretch goals.
+- Uniswap V2 WETH pairs on Base, Ethereum and Arbitrum only. Aerodrome and Uniswap V3 are stretch goals.
+- On Arbitrum, `block.number` inside contracts follows L1 block numbers, so number-based token logic may not
+  be reproduced. PayBox must support the chosen network for a `multiverse_buy` proposal to execute.
 - Simulation cannot foresee owner actions (pausing, blacklisting, changing taxes later), so "consistent" is
   not a guarantee.
 - Block-number gaps are capped at 200 simulated blocks per call, so long horizons mostly advance the clock.
@@ -138,10 +158,10 @@ Requirements: Node.js 24 (reference 24.21.0) and pnpm 11.11.0, on macOS, Linux o
 pnpm install --frozen-lockfile
 pnpm test            # typecheck, deterministic double build, conformance (multiverse_about)
 pnpm unit            # unit tests: ABI encoding, fixture replay, rules table (no network)
-pnpm smoke <token> [amount_eth] [wallet] [tool]   # live: runs dist/plugin.mjs against Base mainnet
+pnpm smoke <token> [amount_eth] [wallet] [tool] [chain]   # live: runs dist/plugin.mjs against mainnet
 ```
 
-To record fixtures, run `pnpm exec tsx scripts/record-fixture.ts <name> <token> [amount_eth] [full|fast]`.
+To record fixtures, run `pnpm exec tsx scripts/record-fixture.ts <name> <token> [amount_eth] [full|fast] [chain]`.
 It saves real `eth_simulateV1` traffic, minus empty filler blocks, to `test/fixtures/`. The replay tests
 require the engine to reproduce each recorded result exactly.
 
@@ -149,8 +169,11 @@ Upload only `dist/plugin.mjs`.
 
 ## PayBox portal configuration
 
-- **Test & configure → Network hosts:** `mainnet.base.org` (primary) and `base-rpc.publicnode.com` (fallback).
-  Both support `eth_simulateV1` (verified 2026-10-17).
+- **Test & configure → Network hosts:** for Base, `mainnet.base.org` (primary) and `base-rpc.publicnode.com`
+  (fallback). For Ethereum, add `ethereum-rpc.publicnode.com` and `eth.drpc.org`. For Arbitrum, add
+  `arbitrum-one-rpc.publicnode.com` and `arb1.arbitrum.io`. All support `eth_simulateV1` (verified 2026-10-17).
+- Live multi-chain checks (2026-10-17): PEPE on Ethereum and ARB and LION on Arbitrum are CONSISTENT, 9/9
+  universes in 0.9–1.1 s.
 - **Variables & Secrets:** none.
 - Conformance sample (`paybox-plugin.json`): `{"tool":"multiverse_about","arguments":{}}`.
 - Portal test inputs:

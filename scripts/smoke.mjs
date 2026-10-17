@@ -1,11 +1,11 @@
-// Live smoke test (not bundled): runs dist/plugin.mjs over stdio and calls one tool against Base mainnet.
-// Usage: node scripts/smoke.mjs <token> [amount_eth] [wallet] [tool]
+// Live smoke test (not bundled): runs dist/plugin.mjs over stdio and calls one tool against mainnet.
+// Usage: node scripts/smoke.mjs <token> [amount_eth] [wallet] [tool] [chain]
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 
-const [token = "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", amount = "0.002", wallet = "0x8ba1f109551bD432803012645Ac136ddd64DBA72", tool = "multiverse_probe"] = process.argv.slice(2);
-const args = tool === "multiverse_about" ? {} : { token, amount_eth: amount, wallet };
+const [token = "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", amount = "0.002", wallet = "0x8ba1f109551bD432803012645Ac136ddd64DBA72", tool = "multiverse_probe", chain] = process.argv.slice(2);
+const args = tool === "multiverse_about" ? {} : { token, amount_eth: amount, wallet, ...(chain ? { chain } : {}) };
 
 const child = spawn(process.execPath, [resolve("dist/plugin.mjs")], { stdio: ["pipe", "pipe", "inherit"] });
 const started = Date.now();

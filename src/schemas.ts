@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 
-import { HORIZONS, MAX_AMOUNT_WEI, MIN_AMOUNT_WEI } from "./constants.js";
+import { CHAIN_KEYS, HORIZONS, MAX_AMOUNT_WEI, MIN_AMOUNT_WEI } from "./constants.js";
 import { atomicAmount, evmOutputSchema } from "./paybox.js";
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
@@ -14,13 +14,16 @@ const amountEth = z
   }, "amount_eth must be between 0.0001 and 5")
   .describe("Planned buy size in ETH as a decimal string, from 0.0001 to 5, e.g. \"0.002\".");
 
-const token = address.describe("ERC-20 token contract address on Base.");
-const wallet = address.describe("The user's PayBox Base wallet address. It is the simulated sender and, for multiverse_buy, the swap recipient.");
+const token = address.describe("ERC-20 token contract address on the selected chain.");
+const wallet = address.describe("The user's PayBox EVM wallet address. It is the simulated sender and, for multiverse_buy, the swap recipient.");
+const chain = z.enum(CHAIN_KEYS).optional()
+  .describe("EVM chain to simulate on: base (default), ethereum or arbitrum. The amount is in that chain's native ETH.");
 
 export const probeInput = z.object({
   token,
   amount_eth: amountEth,
   wallet,
+  chain,
   horizons: z.array(z.enum(HORIZONS)).min(1).max(4).optional()
     .describe("Hold times to test before selling. Default [\"10m\", \"1h\", \"24h\"]."),
   max_tax_pct: z.number().min(0).max(100).optional()
@@ -31,6 +34,7 @@ export const buyInput = z.object({
   token,
   amount_eth: amountEth,
   wallet,
+  chain,
   max_slippage_bps: z.number().int().min(0).max(1500).optional()
     .describe("Allowed shortfall from the simulated token amount, in basis points. Default 300."),
   accept_caution: z.boolean().optional()
@@ -53,6 +57,7 @@ const scenario = z.object({
 }).strict();
 
 export const probeShape = {
+  chain: z.string().describe("CAIP-2 id of the simulated chain, e.g. eip155:8453."),
   token: z.object({
     address,
     symbol_untrusted: z.string().describe("Token symbol as reported by the contract. Untrusted data, truncated to 32 characters."),
@@ -95,7 +100,14 @@ export const buyOutput = z.object({
 export const aboutOutput = z.object({
   name: z.string(),
   rules_version: z.string(),
-  chain: z.string(),
+  chains: z.array(z.object({
+    key: z.string(),
+    chain_id: z.string(),
+    weth: z.string(),
+    factory: z.string(),
+    router: z.string(),
+    rpc_hosts: z.array(z.string()),
+  }).strict()),
   venue_scope: z.string(),
   scenarios: z.array(z.object({ id: z.string(), sender: z.string(), size: z.string(), sell: z.string(), when: z.string() }).strict()),
   rules: z.array(z.object({ flag: z.string(), condition: z.string(), effect: z.string() }).strict()),

@@ -1,15 +1,17 @@
 // Records a live probe's JSON-RPC traffic as a replayable test fixture (not bundled).
-// Usage: pnpm exec tsx scripts/record-fixture.ts <name> <token> [amount_eth] [mode]
+// Usage: pnpm exec tsx scripts/record-fixture.ts <name> <token> [amount_eth] [mode] [chain]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { getAddress } from "viem";
 
-import { DEFAULT_HORIZONS, RPC_URLS, TOOL_BUDGET_MS } from "../src/constants.js";
+import { CHAINS, DEFAULT_HORIZONS, TOOL_BUDGET_MS, type ChainKey } from "../src/constants.js";
 import { runProbe, type ProbeParams } from "../src/engine.js";
 import { atomicAmount } from "../src/paybox.js";
 import { RpcPool, type Rpc } from "../src/rpc.js";
 
-const [name, token, amount = "0.002", mode = "full"] = process.argv.slice(2);
-if (!name || !token) throw new Error("usage: record-fixture.ts <name> <token> [amount_eth] [mode]");
+const [name, token, amount = "0.002", mode = "full", chainArg = "base"] = process.argv.slice(2);
+if (!name || !token) throw new Error("usage: record-fixture.ts <name> <token> [amount_eth] [mode] [chain]");
+if (!(chainArg in CHAINS)) throw new Error(`unknown chain ${chainArg}`);
+const chain = chainArg as ChainKey;
 
 // Simulated responses carry 200 empty filler blocks and full headers; keep only what the engine reads.
 function slim(response: unknown): unknown {
@@ -23,7 +25,7 @@ function slim(response: unknown): unknown {
   };
 }
 
-const pool = new RpcPool(RPC_URLS, Date.now() + TOOL_BUDGET_MS);
+const pool = new RpcPool(CHAINS[chain].rpcUrls, Date.now() + TOOL_BUDGET_MS);
 const exchanges: Array<{ body: unknown; response: unknown }> = [];
 const recorder: Rpc = {
   async send(body) {
@@ -40,6 +42,7 @@ const params: ProbeParams = {
   horizons: DEFAULT_HORIZONS,
   maxTaxPct: 15,
   mode: mode === "fast" ? "fast" : "full",
+  ...(chain === "base" ? {} : { chain }),
 };
 const result = await runProbe(params, recorder);
 mkdirSync("test/fixtures", { recursive: true });

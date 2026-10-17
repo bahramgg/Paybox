@@ -1,6 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, encodePacked, formatEther, getAddress, keccak256, zeroAddress, type Address, type Hex } from "viem";
 
-import { factoryAbi, HORIZON_SECONDS, MAX_SIM_BLOCK_GAP, pairAbi, tokenAbi, V2_FACTORY, WETH, type Horizon } from "./constants.js";
+import { CHAINS, chainByCaip, DEFAULT_CHAIN, factoryAbi, HORIZON_SECONDS, MAX_SIM_BLOCK_GAP, pairAbi, tokenAbi, type ChainKey, type Horizon } from "./constants.js";
 import { RULES, evaluate, type Flag, type Outcome, type ScenarioKind, type Verdict } from "./rules.js";
 import { rpcBatch, rpcCall, type Rpc } from "./rpc.js";
 import {
@@ -17,6 +17,7 @@ export interface ProbeParams {
   horizons: Horizon[];
   maxTaxPct: number;
   mode: "full" | "fast";
+  chain?: ChainKey; // default base
 }
 
 export interface ScenarioOutput {
@@ -35,6 +36,7 @@ export interface ScenarioOutput {
 }
 
 export interface ProbeOutput {
+  chain: string;
   token: { address: Address; symbol_untrusted: string; decimals: number | null };
   venue: { kind: "uniswap_v2"; pair: Address; reserve_weth_eth: string } | null;
   block: { number: number | null; timestamp: number | null; number_gap_limited: boolean };
@@ -78,6 +80,18 @@ interface Buy {
   error: string | null;
 }
 
+// Load-balanced public RPCs sometimes answer from a node that has not reached the anchor block yet
+// ("unsupported block number", "header not found"), most often on fast chains, so a JSON-RPC error is retried once.
+async function retryOnce<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if ((error as { kind?: string }).kind !== "rpc") throw error;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return run();
+  }
+}
+
 // Two deterministic throwaway addresses per token, so wallet-specific rules show up.
 export function freshWallet(token: Address, index: number): Address {
   const hash = keccak256(encodePacked(["string", "address", "uint8"], ["multiverse.fresh", token, index]));
@@ -110,7 +124,10 @@ export function planScenarios(params: ProbeParams): Plan[] {
 
 export async function runProbe(params: ProbeParams, rpc: Rpc): Promise<ProbeResult> {
   const plans = planScenarios(params);
+  const chain = CHAINS[params.chain ?? DEFAULT_CHAIN];
+  const step = BigInt(chain.blockSeconds);
   const output: ProbeOutput = {
+    chain: chain.caip,
     token: { address: params.token, symbol_untrusted: "", decimals: null },
     venue: null,
     block: { number: null, timestamp: null, number_gap_limited: false },
@@ -131,7 +148,7 @@ export async function runProbe(params: ProbeParams, rpc: Rpc): Promise<ProbeResu
   try {
     const [block, pairCall, decimalsCall, symbolCall] = await rpcBatch(rpc, [
       { method: "eth_getBlockByNumber", params: ["latest", false] },
-      { method: "eth_call", params: [{ to: V2_FACTORY, data: encodeFunctionData({ abi: factoryAbi, functionName: "getPair", args: [params.token, WETH] }) }, "latest"] },
+      { method: "eth_call", params: [{ to: chain.factory, data: encodeFunctionData({ abi: factoryAbi, functionName: "getPair", args: [params.token, chain.weth] }) }, "latest"] },
       { method: "eth_call", params: [{ to: params.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "decimals" }) }, "latest"] },
       { method: "eth_call", params: [{ to: params.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "symbol" }) }, "latest"] },
     ]);
@@ -149,37 +166,37 @@ export async function runProbe(params: ProbeParams, rpc: Rpc): Promise<ProbeResu
 
   if (pair === zeroAddress) {
     output.verdict = "UNSUPPORTED_VENUE";
-    output.recommendation = "Not testable: this token has no Uniswap V2 WETH pair on Base, so Multiverse cannot simulate it and it must not be treated as safe.";
+    output.recommendation = `Not testable: this token has no Uniswap V2 WETH pair on ${chain.name}, so Multiverse cannot simulate it and it must not be treated as safe.`;
     output.first_divergence = null;
     return { output, userBuyReceived: null, header };
   }
 
   // Reserves run alongside Phase A.
-  const reservesPromise = rpcCall(rpc, {
+  const reservesPromise = retryOnce(() => rpcCall(rpc, {
     method: "eth_call",
     params: [{ to: pair, data: encodeFunctionData({ abi: pairAbi, functionName: "getReserves" }) }, `0x${header.number.toString(16)}`],
-  }).then((result) => {
+  })).then((result) => {
     const [reserve0, reserve1] = decodeFunctionResult({ abi: pairAbi, functionName: "getReserves", data: result as Hex });
-    return BigInt(WETH) < BigInt(params.token) ? reserve0 : reserve1;
+    return BigInt(chain.weth) < BigInt(params.token) ? reserve0 : reserve1;
   }).catch(() => null);
 
   // Phase A: one simulation per distinct sender and size, to learn what the buy delivers.
   const buyKey = (plan: Plan) => `${plan.sender}:${plan.amountWei}`;
   const buyPlans = [...new Map(plans.map((plan) => [buyKey(plan), plan])).values()];
   const firstBlock = (plan: Plan, calls: SimBlock["calls"]): SimBlock => ({
-    number: header.number + 1n, time: header.timestamp + 2n, calls, fund: fundSender(plan.sender, plan.amountWei),
+    number: header.number + 1n, time: header.timestamp + step, calls, fund: fundSender(plan.sender, plan.amountWei, header),
   });
   const buyDeadline = header.timestamp + 3_600n;
   const buys = new Map<string, Buy | Error>();
   await Promise.all(buyPlans.map(async (plan) => {
     const blocks = [firstBlock(plan, [
       balanceCall(plan.sender, params.token),
-      quoteBuyCall(plan.sender, params.token, plan.amountWei),
-      buyCall(plan.sender, params.token, plan.amountWei, 0n, buyDeadline),
+      quoteBuyCall(plan.sender, params.token, plan.amountWei, chain),
+      buyCall(plan.sender, params.token, plan.amountWei, 0n, buyDeadline, chain),
       balanceCall(plan.sender, params.token),
     ])];
     try {
-      const [block] = requestedBlocks(await rpcCall(rpc, simulateRequest(blocks, header)), blocks);
+      const [block] = requestedBlocks(await retryOnce(() => rpcCall(rpc, simulateRequest(blocks, header))), blocks);
       const [before, quote, buy, after] = block?.calls ?? [];
       if (!buy) throw new Error("simulation returned no buy result");
       // Transfer logs first; the balance difference covers tokens with non-standard events.
@@ -206,24 +223,29 @@ export async function runProbe(params: ProbeParams, rpc: Rpc): Promise<ProbeResu
 
     const portions = plan.split ? [buy.received / 2n, buy.received - buy.received / 2n] : [buy.received];
     const build = (gapBlocks: bigint): SimBlock[] => {
-      const sellTime = header.timestamp + 2n + (plan.holdSeconds > 0 ? BigInt(plan.holdSeconds) : 2n);
+      const sellTime = header.timestamp + step + (plan.holdSeconds > 0 ? BigInt(plan.holdSeconds) : step);
       const deadline = sellTime + 3_600n;
-      const blocks: SimBlock[] = [firstBlock(plan, [buyCall(plan.sender, params.token, plan.amountWei, 0n, buyDeadline), approveCall(plan.sender, params.token)])];
+      const blocks: SimBlock[] = [firstBlock(plan, [
+        buyCall(plan.sender, params.token, plan.amountWei, 0n, buyDeadline, chain),
+        approveCall(plan.sender, params.token, chain),
+      ])];
       portions.forEach((amount, index) => {
         blocks.push({
           number: header.number + 1n + gapBlocks + BigInt(index),
-          time: sellTime + 2n * BigInt(index),
-          calls: [quoteSellCall(plan.sender, params.token, amount), sellCall(plan.sender, params.token, amount, deadline)],
+          time: sellTime + step * BigInt(index),
+          calls: [quoteSellCall(plan.sender, params.token, amount, chain), sellCall(plan.sender, params.token, amount, deadline, chain)],
         });
       });
       return blocks;
     };
-    const wantedGap = plan.holdSeconds > 0 ? BigInt(Math.min(Math.floor(plan.holdSeconds / 2), MAX_SIM_BLOCK_GAP)) : 1n;
+    const wantedGap = plan.holdSeconds > 0
+      ? BigInt(Math.max(1, Math.min(Math.floor(plan.holdSeconds / chain.blockSeconds), MAX_SIM_BLOCK_GAP)))
+      : 1n;
 
     let blocks = build(wantedGap);
     let result: unknown;
     try {
-      result = await rpcCall(rpc, simulateRequest(blocks, header));
+      result = await retryOnce(() => rpcCall(rpc, simulateRequest(blocks, header)));
     } catch (error) {
       const rejected = (error as { kind?: string }).kind === "rpc";
       if (!rejected || wantedGap === 1n) return missing(plan, `sell simulation failed: ${(error as Error).message}`);
@@ -254,7 +276,7 @@ export async function runProbe(params: ProbeParams, rpc: Rpc): Promise<ProbeResu
       const quoted = decodeQuote(quote);
       if (quoted === null) expectedKnown = false;
       expected += quoted ?? 0n;
-      received += sumTransfersTo(sell, WETH, plan.sender);
+      received += sumTransfersTo(sell, chain.weth, plan.sender);
     }
     return outcomeFor(plan, {
       buyOk: true, buyTaxPct: buyTax, sellOk: true,
@@ -334,7 +356,7 @@ export function summarize(output: ProbeOutput, amountWei: bigint): string {
     `Token ${output.token.address}${symbol}; ${output.venue ? `Uniswap V2 pool ${output.venue.pair} with ${output.venue.reserve_weth_eth} WETH` : "no supported pool"}.`,
   ];
   if (output.scenarios.length) {
-    lines.push(`Simulated ${done}/${output.scenarios.length} universes for ${formatEther(amountWei)} ETH at Base block ${output.block.number ?? "unknown"}.`);
+    lines.push(`Simulated ${done}/${output.scenarios.length} universes for ${formatEther(amountWei)} ETH at ${chainByCaip(output.chain)?.name ?? output.chain} block ${output.block.number ?? "unknown"}.`);
     lines.push(`Now: buy tax ${pct(now?.buy_tax_pct ?? null)}, sell tax ${pct(now?.sell_tax_pct ?? null)}, round trip ${pct(now?.round_trip_loss_pct ?? null)}; exit horizon: ${output.exit_horizon ?? "none"}.`);
   }
   lines.push(`First divergence: ${output.first_divergence ?? "none"}.`);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { CHAINS } from "../src/constants.js";
 import { runProbe, summarize, type ProbeParams } from "../src/engine.js";
 import { type Rpc } from "../src/rpc.js";
 import { probeOutput } from "../src/schemas.js";
@@ -25,7 +26,7 @@ function load(name: string) {
   return { fixture, replay, params: { ...fixture.params, amountWei: BigInt(fixture.params.amountWei) } as ProbeParams };
 }
 
-for (const name of ["virtual_consistent", "dcplus_taxed", "temo_buy_fails", "unsupported_venue", "virtual_fast"]) {
+for (const name of ["virtual_consistent", "dcplus_taxed", "temo_buy_fails", "unsupported_venue", "virtual_fast", "ethereum_pepe"]) {
   test(`replay: ${name} reproduces the recorded result`, async () => {
     const { fixture, replay, params } = load(name);
     const result = await runProbe(params, replay);
@@ -93,4 +94,28 @@ test("replay: losing Phase B for one universe yields INCOMPLETE", async () => {
   const { output } = await runProbe(params, flaky);
   assert.equal(output.verdict, "INCOMPLETE");
   assert.equal(output.scenarios.find((scenario) => scenario.id === "sequence")!.simulated, false);
+});
+
+test("replay: Ethereum PEPE simulates on Ethereum's router with 12 s blocks", async () => {
+  const { fixture, replay, params } = load("ethereum_pepe");
+  const { output } = await runProbe(params, replay);
+  assert.equal(output.chain, "eip155:1");
+  assert.equal(output.verdict, "CONSISTENT");
+  assert.equal(output.scenarios.length, 9);
+  type Body = { method?: string; params?: [{ blockStateCalls: Array<{ blockOverrides: { number: string; time: string }; calls: Array<{ to: string }> }> }] };
+  const sims = fixture.exchanges.map((exchange) => exchange.body as Body).filter((body) => body.method === "eth_simulateV1");
+  const allowed = new Set([CHAINS.ethereum.router.toLowerCase(), params.token.toLowerCase()]);
+  for (const body of sims) {
+    const blocks = body.params![0].blockStateCalls;
+    assert.equal(BigInt(blocks[0]!.blockOverrides.time) - BigInt(output.block.timestamp!), 12n);
+    assert.ok(blocks.every((block) => block.calls.every((call) => allowed.has(call.to.toLowerCase()))));
+  }
+  // A 10-minute hold on 12 s blocks advances 50 blocks, so the RPC's filler blocks stay behind the sell block's time.
+  const gaps = sims.map((body) => body.params![0].blockStateCalls).filter((blocks) => blocks.length === 2)
+    .map((blocks) => [
+      Number(BigInt(blocks[1]!.blockOverrides.number) - BigInt(blocks[0]!.blockOverrides.number)),
+      Number(BigInt(blocks[1]!.blockOverrides.time) - BigInt(blocks[0]!.blockOverrides.time)),
+    ] as const);
+  assert.ok(gaps.some(([blocks, seconds]) => blocks === 50 && seconds === 600));
+  assert.ok(gaps.every(([blocks, seconds]) => (blocks - 1) * 12 < seconds));
 });

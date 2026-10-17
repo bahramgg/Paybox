@@ -1,3 +1,4 @@
+import { CHAINS } from "./constants.js";
 import { DISCLAIMER } from "./engine.js";
 import { RULES } from "./rules.js";
 
@@ -5,8 +6,15 @@ import { RULES } from "./rules.js";
 export const ABOUT = {
   name: "Multiverse",
   rules_version: RULES.version,
-  chain: "eip155:8453",
-  venue_scope: "Tokens with a Uniswap V2 TOKEN/WETH pair on Base. Anything else returns UNSUPPORTED_VENUE.",
+  chains: Object.values(CHAINS).map((chain) => ({
+    key: chain.key,
+    chain_id: chain.caip,
+    weth: chain.weth,
+    factory: chain.factory,
+    router: chain.router,
+    rpc_hosts: chain.rpcUrls.map((url) => new URL(url).hostname),
+  })),
+  venue_scope: "Tokens with a Uniswap V2 TOKEN/WETH pair on Base (default), Ethereum or Arbitrum. Anything else returns UNSUPPORTED_VENUE.",
   scenarios: [
     { id: "now", sender: "user wallet", size: "1x", sell: "100%", when: "next block" },
     { id: "t_10m / t_1h / t_6h / t_24h", sender: "user wallet", size: "1x", sell: "100%", when: "after the hold (requested horizons)" },
@@ -43,13 +51,14 @@ export const ABOUT = {
     { verdict: "CONSISTENT", meaning: `every universe bought and sold, taxes within ${RULES.consistentBandPts} points of each other` },
     { verdict: "CAUTION", meaning: "the trade works but behaves differently by size, time, tax level or liquidity" },
     { verdict: "BLOCK", meaning: "some universe cannot exit, or the token treats wallets differently" },
-    { verdict: "UNSUPPORTED_VENUE", meaning: "no Uniswap V2 WETH pair on Base; nothing was simulated" },
+    { verdict: "UNSUPPORTED_VENUE", meaning: "no Uniswap V2 WETH pair on the selected chain; nothing was simulated" },
     { verdict: "INCOMPLETE", meaning: "not every universe could be simulated; no conclusion" },
   ],
   limitations: [
-    "Uniswap V2 WETH pairs on Base only.",
+    "Uniswap V2 WETH pairs on Base, Ethereum and Arbitrum only.",
     "Simulation cannot foresee owner actions such as pausing, blacklisting or changing taxes later; consistent is not a guarantee.",
     "Block-number gaps are capped at 200 blocks per simulation (the RPC allows 256), so long horizons mostly advance the clock.",
+    "Simulated blocks are 2 s apart on Base and 12 s apart on Ethereum and Arbitrum; on Arbitrum, block.number inside contracts follows L1, so number-based token logic may not be reproduced.",
     "Results depend on the current pool state; large trades move the price, and other traders are not simulated.",
     "Read-only: nothing is deployed or broadcast; multiverse_buy returns at most one unsigned proposal for PayBox to approve.",
   ],

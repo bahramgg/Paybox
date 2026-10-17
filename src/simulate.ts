@@ -1,6 +1,6 @@
 import { decodeAbiParameters, decodeFunctionResult, encodeFunctionData, hexToString, maxUint256, type Address, type Hex } from "viem";
 
-import { BALANCE_BUFFER_WEI, routerAbi, SIM_GAS, SIM_PRIORITY_FEE_WEI, tokenAbi, TRANSFER_TOPIC, V2_ROUTER, WETH } from "./constants.js";
+import { BALANCE_BUFFER_WEI, CHAINS, routerAbi, SIM_GAS, SIM_PRIORITY_FEE_WEI, tokenAbi, TRANSFER_TOPIC, type ChainConfig } from "./constants.js";
 import { untrustedText } from "./text.js";
 
 export interface Header {
@@ -87,22 +87,26 @@ export function simulateRequest(blocks: SimBlock[], header: Header) {
   };
 }
 
-export const fundSender = (sender: Address, amountWei: bigint) => ({ address: sender, balance: amountWei + BALANCE_BUFFER_WEI });
+// The trade amount plus gas for every call at the simulated fee cap, never less than the 0.05 ETH floor.
+export function fundSender(sender: Address, amountWei: bigint, header: Header) {
+  const gas = SIM_GAS * (header.baseFee * 2n + SIM_PRIORITY_FEE_WEI) * 8n;
+  return { address: sender, balance: amountWei + (gas > BALANCE_BUFFER_WEI ? gas : BALANCE_BUFFER_WEI) };
+}
 
-export const quoteBuyCall = (sender: Address, token: Address, amountWei: bigint): SimCall => ({
-  from: sender, to: V2_ROUTER,
-  data: encodeFunctionData({ abi: routerAbi, functionName: "getAmountsOut", args: [amountWei, [WETH, token]] }),
+export const quoteBuyCall = (sender: Address, token: Address, amountWei: bigint, chain: ChainConfig = CHAINS.base): SimCall => ({
+  from: sender, to: chain.router,
+  data: encodeFunctionData({ abi: routerAbi, functionName: "getAmountsOut", args: [amountWei, [chain.weth, token]] }),
 });
 
-export const buyCall = (sender: Address, token: Address, amountWei: bigint, minOut: bigint, deadline: bigint): SimCall => ({
-  from: sender, to: V2_ROUTER, value: amountWei,
-  data: buyCalldata(token, sender, minOut, deadline),
+export const buyCall = (sender: Address, token: Address, amountWei: bigint, minOut: bigint, deadline: bigint, chain: ChainConfig = CHAINS.base): SimCall => ({
+  from: sender, to: chain.router, value: amountWei,
+  data: buyCalldata(token, sender, minOut, deadline, chain),
 });
 
-export function buyCalldata(token: Address, recipient: Address, minOut: bigint, deadline: bigint): Hex {
+export function buyCalldata(token: Address, recipient: Address, minOut: bigint, deadline: bigint, chain: ChainConfig = CHAINS.base): Hex {
   return encodeFunctionData({
     abi: routerAbi, functionName: "swapExactETHForTokensSupportingFeeOnTransferTokens",
-    args: [minOut, [WETH, token], recipient, deadline],
+    args: [minOut, [chain.weth, token], recipient, deadline],
   });
 }
 
@@ -111,21 +115,21 @@ export const balanceCall = (sender: Address, token: Address): SimCall => ({
   data: encodeFunctionData({ abi: tokenAbi, functionName: "balanceOf", args: [sender] }),
 });
 
-export const approveCall = (sender: Address, token: Address): SimCall => ({
+export const approveCall = (sender: Address, token: Address, chain: ChainConfig = CHAINS.base): SimCall => ({
   from: sender, to: token,
-  data: encodeFunctionData({ abi: tokenAbi, functionName: "approve", args: [V2_ROUTER, maxUint256] }),
+  data: encodeFunctionData({ abi: tokenAbi, functionName: "approve", args: [chain.router, maxUint256] }),
 });
 
-export const quoteSellCall = (sender: Address, token: Address, amount: bigint): SimCall => ({
-  from: sender, to: V2_ROUTER,
-  data: encodeFunctionData({ abi: routerAbi, functionName: "getAmountsOut", args: [amount, [token, WETH]] }),
+export const quoteSellCall = (sender: Address, token: Address, amount: bigint, chain: ChainConfig = CHAINS.base): SimCall => ({
+  from: sender, to: chain.router,
+  data: encodeFunctionData({ abi: routerAbi, functionName: "getAmountsOut", args: [amount, [token, chain.weth]] }),
 });
 
-export const sellCall = (sender: Address, token: Address, amount: bigint, deadline: bigint): SimCall => ({
-  from: sender, to: V2_ROUTER,
+export const sellCall = (sender: Address, token: Address, amount: bigint, deadline: bigint, chain: ChainConfig = CHAINS.base): SimCall => ({
+  from: sender, to: chain.router,
   data: encodeFunctionData({
     abi: routerAbi, functionName: "swapExactTokensForTokensSupportingFeeOnTransferTokens",
-    args: [amount, 0n, [token, WETH], sender, deadline],
+    args: [amount, 0n, [token, chain.weth], sender, deadline],
   }),
 });
 
