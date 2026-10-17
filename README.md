@@ -1,6 +1,6 @@
 # Multiverse — test-drive any token in 10 futures before you buy
 
-A PayBox plugin for the MoonPay Hackathon (Chapter 1). Owner: Bahram (@nabu_lines).
+A PayBox plugin for the MoonPay Hackathon (Chapter 1).
 
 Honeypot checkers ask one question: can a wallet sell this token right now? A clean answer at one
 moment does not prove you can exit later. Multiverse simulates the agent's exact planned trade
