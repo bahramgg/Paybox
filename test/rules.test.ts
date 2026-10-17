@@ -87,6 +87,17 @@ test("rules: revert reasons are quoted in a restricted alphabet", () => {
   assert.ok(!result.divergence!.includes("\"buy"));
 });
 
+test("rules: divergence wording names what actually diverged", () => {
+  const cooldown = run(universe({ now: sellFails, wallet_b: sellFails, sequence: sellFails, size_quarter: sellFails, size_4x: sellFails }));
+  assert.equal(cooldown.verdict, "BLOCK");
+  assert.match(cooldown.divergence!, /although selling after 10m works/);
+  const flat60 = run(universe(allTaxed(0, 60)));
+  assert.deepEqual(flat60.flags, ["SELL_BREAKS_LATER", "TAX_ABOVE_LIMIT"]);
+  assert.match(flat60.divergence!, /costs 60% tax now and 60% after holding 10m/);
+  const sellOnly = run(universe(allTaxed(0, 30)));
+  assert.equal(sellOnly.divergence, "the sell tax (30%) is above the 15% limit");
+});
+
 test("rules: fast mode (now and 1h only) can be consistent", () => {
   const result = run([scenario("now"), scenario("t_1h")]);
   assert.equal(result.verdict, "CONSISTENT");

@@ -157,6 +157,27 @@ Upload only `dist/plugin.mjs`.
   - probe: `{"token":"0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b","amount_eth":"0.002","wallet":"<your Base wallet>"}` (VIRTUAL, CONSISTENT)
   - buy: the same input on `multiverse_buy` returns a proposal. Use **Validate transaction** with the same wallet.
 
+## Tested tokens (Base mainnet, 2026-10-17)
+
+These are live probes of the 9-universe set at 0.002 ETH unless noted. Snapshot columns are what GoPlus
+and honeypot.is reported at the same time.
+
+| Token | Multiverse | First divergence | Single-snapshot checkers |
+|---|---|---|---|
+| VIRTUAL `0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b` | CONSISTENT | none (0% / 0%, round trip 0.6%) | clean |
+| OPAL `0x119b63b1605be3a8ff4543c7f76f7f1f79eecd1f` | CONSISTENT | none (5% / 5% tax everywhere) | clean |
+| PRXN `0xa0865cf95b23c35b980736878892848c62783214` at 0.4 ETH | CAUTION `SIZE_DEPENDENT` | a 1.6 ETH trade fails (max sell is 1% of supply) | GoPlus clean, honeypot.is low risk |
+| G2G `0x578ec5f37e0e459dec94805bf7b122e931eb34e4` | BLOCK `SELL_FAILS_NOW` | selling right after buying fails, although selling after 10m works (sell cooldown) | GoPlus: cooldown |
+| Joy `0x59c78b07247b621aa17997aa5b27df86bb036613` | BLOCK `SELL_FAILS_NOW` | selling right after buying fails | GoPlus: not a honeypot; honeypot.is: honeypot |
+| KEKIUS `0x8c7569468d8b08d3fb6cf8f52b53af3c2b9a94b3` | CAUTION `TAX_ABOVE_LIMIT` | the sell tax (50%) is above the 15% limit | 50% sell tax |
+| Temo `0x4ef531e3dfbe63205e13b2b943630a53e6ac1c14` | BLOCK `BUY_FAILS_NOW` | the buy itself reverts (drained pool) | — |
+
+Known blind spot: PEPETO (`0x7750c906cf0774f5a05ded0fb96ef8cd412af376`) blocks holders through an
+owner-run registry. Fresh wallets are never flagged, so the default probe says CONSISTENT, while
+honeypot.is reports that 348 of 349 real holders cannot sell. Probing with a flagged holder's address as
+`wallet` returns BLOCK (`SELL_FAILS_NOW`, `WALLET_DEPENDENT`). A "recent real holder" universe would catch
+this; it is a candidate for the next scenario set.
+
 ## Agent flow
 
 1. User: "Buy $5 of <token> on Base."

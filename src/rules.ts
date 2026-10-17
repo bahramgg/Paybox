@@ -76,7 +76,12 @@ export function evaluate(outcomes: Outcome[], options: { reserveWethWei: bigint 
   const later = outcomes.filter((outcome) => outcome.kind === "horizon" && outcome.simulated).sort((a, b) => a.holdSeconds - b.holdSeconds);
 
   if (now?.simulated && !now.buyOk) flag("BUY_FAILS_NOW", `the buy itself reverts${reason(now)}`);
-  else if (now?.simulated && !now.sellOk) flag("SELL_FAILS_NOW", `selling right after buying fails${reason(now)}`);
+  else if (now?.simulated && !now.sellOk) {
+    const laterOk = later.find(works);
+    flag("SELL_FAILS_NOW", laterOk
+      ? `selling right after buying fails${reason(now)}, although selling after ${laterOk.hold} works (a sell cooldown or time lock)`
+      : `selling right after buying fails${reason(now)}`);
+  }
 
   if (works(now)) {
     const nowSell = now.sellTaxPct ?? 0;
@@ -84,7 +89,9 @@ export function evaluate(outcomes: Outcome[], options: { reserveWethWei: bigint 
       if (!outcome.buyOk || !outcome.sellOk) {
         flag("SELL_BREAKS_LATER", `selling works now but fails after holding ${outcome.hold}${reason(outcome)}`);
       } else if ((outcome.sellTaxPct ?? 0) > RULES.laterSellTaxBreakPct) {
-        flag("SELL_BREAKS_LATER", `sell tax jumps from ${nowSell}% now to ${outcome.sellTaxPct}% after holding ${outcome.hold}`);
+        flag("SELL_BREAKS_LATER", nowSell > RULES.laterSellTaxBreakPct
+          ? `selling costs ${nowSell}% tax now and ${outcome.sellTaxPct}% after holding ${outcome.hold}, above the ${RULES.laterSellTaxBreakPct}% line`
+          : `sell tax jumps from ${nowSell}% now to ${outcome.sellTaxPct}% after holding ${outcome.hold}`);
       } else if ((outcome.sellTaxPct ?? 0) > nowSell + RULES.consistentBandPts) {
         flag("TAX_RISES_LATER", `sell tax rises from ${nowSell}% now to ${outcome.sellTaxPct}% after holding ${outcome.hold}`);
       } else if ((outcome.sellTaxPct ?? 0) < nowSell - RULES.consistentBandPts) {
@@ -136,8 +143,12 @@ export function evaluate(outcomes: Outcome[], options: { reserveWethWei: bigint 
   for (const outcome of [now, ...later]) {
     if (works(outcome) && (outcome.sellTaxPct ?? 0) <= options.maxTaxPct) exitHorizon = outcome.hold;
   }
-  if (works(now) && ((now.buyTaxPct ?? 0) > options.maxTaxPct || (now.sellTaxPct ?? 0) > options.maxTaxPct)) {
-    flag("TAX_ABOVE_LIMIT", `buying now costs ${now.buyTaxPct}% tax and selling ${now.sellTaxPct}%, above the ${options.maxTaxPct}% limit`);
+  if (works(now)) {
+    const over = [
+      (now.buyTaxPct ?? 0) > options.maxTaxPct ? `the buy tax (${now.buyTaxPct}%)` : null,
+      (now.sellTaxPct ?? 0) > options.maxTaxPct ? `the sell tax (${now.sellTaxPct}%)` : null,
+    ].filter((part): part is string => part !== null);
+    if (over.length) flag("TAX_ABOVE_LIMIT", `${over.join(" and ")} ${over.length > 1 ? "are" : "is"} above the ${options.maxTaxPct}% limit`);
   }
 
   const simulated = outcomes.filter((outcome) => outcome.simulated);
