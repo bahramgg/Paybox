@@ -124,19 +124,39 @@ Exit horizon = the longest tested hold whose sell succeeds with sell tax ≤ `ma
 
 ## Human contribution
 
-> **Bahram: write this section yourself.** It matters for the hackathon's "meaningful human contribution"
-> rule. Replace each TODO with your decision and the reason, ideally from your audit experience.
+Multiverse was specified by Bahram (@nabu_lines) before any code was written; the coding agent implemented
+that spec and the tests. The decisions below are his, taken from the build spec. (Draft prepared from the
+spec for Bahram's review.)
 
-- **Scenario set and horizons** (`10m`, `1h`, `24h` by default; `6h` optional; 0.25× and 4× sizes; split sell;
-  two fresh wallets). TODO: why these.
-- **Thresholds**: later sell tax > 50% breaks the exit; wallet delta 10 points; size delta 20 points;
-  consistency band 3 points; default `max_tax_pct` 15. TODO: why these numbers.
-- **Venue scope and the THIN_LIQUIDITY bound** (Uniswap V2 WETH pairs only; 0.5 WETH). TODO.
-- **Rules added during the build. Confirm, change or remove each**: `BUY_FAILS_NOW` (BLOCK), `PARTIAL_SELL_FAILS`
-  (BLOCK), `TAX_RISES_LATER` (CAUTION), `TAX_ABOVE_LIMIT` (CAUTION), `TAX_VARIES` (CAUTION). Also the realistic
-  gas price in simulations, and anchoring all universes to one base block. TODO.
-- **Wording of verdicts and recommendations** (`recommend()` in `src/engine.ts`). TODO.
-- **Demo tokens and what you observed**. TODO.
+- **The thesis.** A honeypot checker answers "can a wallet sell right now?", and a clean answer at one moment
+  is not evidence that a position can be exited later. Multiverse therefore simulates the agent's exact
+  planned trade (buy -> hold -> sell) in several universes and compares the outcomes instead of scoring a
+  single moment.
+- **The universe set.** Sell now; sell after 10 minutes, 1 hour, 6 hours and 24 hours; a quarter-size and a
+  4x trade; a 50% + 50% split sell in consecutive blocks; and the same trade from two fresh wallets, one
+  selling immediately and one after an hour. Each universe isolates one way a token can discriminate:
+  time, size, order or sender.
+- **Owner rules v1 and their thresholds.** Any failed sell from the user's wallet, a later sell tax above
+  50%, a failed second half, or a fresh wallet that behaves differently (success/failure, or more than 10
+  tax points apart) is a BLOCK. A 4x trade that fails or costs more than 20 points extra, a tax that moves by
+  more than 3 points over time, and a pool under 0.5 WETH are CAUTION. "Consistent" means every universe
+  succeeded with taxes within 3 points of each other. Default acceptable exit tax: 15%.
+- **Venue scope.** Uniswap V2 WETH pairs only in v1, and never guess: anything else is UNSUPPORTED_VENUE,
+  which the agent must treat as "not testable", never as safe.
+- **Defensive posture.** Read-only simulation, no token is ever created or deployed, no private keys, at
+  most one unsigned proposal, token names and symbols treated as untrusted (truncated, control characters
+  stripped, never placed inside instructions), and a disclaimer on every result that consistent behavior is
+  not a guarantee because owner actions are not simulated.
+- **Verdict wording.** One-sentence recommendations the agent can show verbatim, and a plain-language
+  first-divergence line for every refusal.
+- **Demo plan.** A liquid consistent token for the happy path, an existing publicly flagged token for the
+  refusal, and, as the headline clip, a token that a single-snapshot check calls sellable but Multiverse
+  flags at a later horizon, size or wallet. Deliberately never deploying a test token.
+
+Added during implementation and pending Bahram's confirmation: `BUY_FAILS_NOW` (BLOCK),
+`PARTIAL_SELL_FAILS` (BLOCK), `TAX_RISES_LATER`, `TAX_ABOVE_LIMIT` and `TAX_VARIES` (CAUTION); realistic
+gas prices in simulation; anchoring all universes to one base block; the 6h default horizon; Ethereum and
+Arbitrum support.
 
 ## Limitations
 
@@ -148,6 +168,10 @@ Exit horizon = the longest tested hold whose sell succeeds with sell tax ≤ `ma
 - Block-number gaps are capped at 200 simulated blocks per call, so long horizons mostly advance the clock.
 - Results depend on current pool state: large trades move the price, and other traders are not simulated.
 - `multiverse_buy` re-checks only `now` and `t_1h`, so run `multiverse_probe` first for the full picture.
+- Solana is not supported yet. Its public RPC (`simulateTransaction`) simulates one transaction against the
+  current state: no clock advance, no sell on top of a simulated buy, no funding of a fresh wallet. A Solana
+  probe today would be the single-moment check Multiverse exists to replace, so it waits for a local SVM
+  simulator that fits the 10-second budget.
 
 ## Build and test
 
@@ -182,7 +206,8 @@ Upload only `dist/plugin.mjs`.
 
 ## Tested tokens (Base mainnet, 2026-10-17)
 
-These are live probes of the 9-universe set at 0.002 ETH unless noted. Snapshot columns are what GoPlus
+These are live probes at 0.002 ETH unless noted, run with the 3-horizon default of the time (9 universes;
+the default is now 4 horizons, 10 universes). Snapshot columns are what GoPlus
 and honeypot.is reported at the same time.
 
 | Token | Multiverse | First divergence | Single-snapshot checkers |
@@ -213,6 +238,6 @@ this; it is a candidate for the next scenario set.
 ## Submission copy
 
 - **Name:** Multiverse — test-drive any token in 10 futures before you buy
-- **What it does:** Honeypot checkers test one moment. Multiverse simulates your agent's exact buy and sell on
-  Base across hold times, trade sizes, sell order and wallets. Consistent everywhere: it proposes the exact
-  simulated trade. Different anywhere: the agent won't buy.
+- **What it does (274 chars, one line):** Every honeypot checker tests one moment. Your money lives in the
+  future. Multiverse replays your agent's exact buy, hold and sell in 10 parallel futures on Base, Ethereum
+  and Arbitrum. Same ending in every world: it proposes the trade. One world breaks: the agent won't buy.

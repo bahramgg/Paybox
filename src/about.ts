@@ -61,6 +61,7 @@ export const ABOUT = {
     "Simulated blocks are 2 s apart on Base and 12 s apart on Ethereum and Arbitrum; on Arbitrum, block.number inside contracts follows L1, so number-based token logic may not be reproduced.",
     "Results depend on the current pool state; large trades move the price, and other traders are not simulated.",
     "Read-only: nothing is deployed or broadcast; multiverse_buy returns at most one unsigned proposal for PayBox to approve.",
+    "Solana is not supported yet: its public RPC simulates one transaction against the current state, with no clock advance, no sell on top of a simulated buy and no funding of a fresh wallet, so a Solana probe today would be the single-moment check Multiverse exists to replace. It waits for a local SVM simulator that fits the 10-second budget.",
   ],
   disclaimer: DISCLAIMER,
 };

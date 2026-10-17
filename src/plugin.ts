@@ -27,7 +27,7 @@ function createServer() {
     {
       title: "Multiverse probe",
       description:
-        "Simulates a planned token buy and sell on Base, Ethereum or Arbitrum across hold times, trade sizes, sell order and wallets, and reports whether the token behaves the same in every case. Read-only.",
+        "Simulates a planned token buy, hold and sell in ten universes (hold times, trade sizes, sell order and sender wallets) on Base, Ethereum or Arbitrum, and reports whether the token behaves the same in every one. Read-only.",
       inputSchema: probeInput,
       outputSchema: probeOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },

@@ -71,7 +71,7 @@ export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11
 export const HORIZONS = ["10m", "1h", "6h", "24h"] as const;
 export type Horizon = (typeof HORIZONS)[number];
 export const HORIZON_SECONDS: Record<Horizon, number> = { "10m": 600, "1h": 3_600, "6h": 21_600, "24h": 86_400 };
-export const DEFAULT_HORIZONS: Horizon[] = ["10m", "1h", "24h"];
+export const DEFAULT_HORIZONS: Horizon[] = ["10m", "1h", "6h", "24h"]; // with now, sizes, sequence and two wallets: 10 universes
 
 export const factoryAbi = parseAbi(["function getPair(address tokenA, address tokenB) view returns (address pair)"]);
 export const pairAbi = parseAbi(["function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)"]);

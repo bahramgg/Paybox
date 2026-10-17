@@ -25,7 +25,7 @@ export const probeInput = z.object({
   wallet,
   chain,
   horizons: z.array(z.enum(HORIZONS)).min(1).max(4).optional()
-    .describe("Hold times to test before selling. Default [\"10m\", \"1h\", \"24h\"]."),
+    .describe("Hold times to test before selling. Default [\"10m\", \"1h\", \"6h\", \"24h\"], which makes 10 universes."),
   max_tax_pct: z.number().min(0).max(100).optional()
     .describe("Highest acceptable sell tax in percent for the exit horizon. Default 15."),
 }).strict();
