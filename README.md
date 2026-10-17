@@ -226,6 +226,14 @@ honeypot.is reports that 348 of 349 real holders cannot sell. Probing with a fla
 `wallet` returns BLOCK (`SELL_FAILS_NOW`, `WALLET_DEPENDENT`). A "recent real holder" universe would catch
 this; it is a candidate for the next scenario set.
 
+## End-to-end verification (2026-10-17)
+
+- Hosted checks passed in the PayBox developer portal (3 tools discovered); the hosted `multiverse_probe` test
+  on VIRTUAL returned CONSISTENT, 10/10 universes, in 4.1 s.
+- Through the PayBox agent connector (`discover_plugins` -> `use_plugin`), the installed plugin returned the
+  same verdicts as the local runs: VIRTUAL CONSISTENT (10/10), PRXN at 0.4 ETH CAUTION `SIZE_DEPENDENT`
+  ("a 1.6 ETH trade fails"), Joy BLOCK `SELL_FAILS_NOW`.
+
 ## Agent flow
 
 1. User: "Buy $5 of <token> on Base."
